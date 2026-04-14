@@ -1,41 +1,25 @@
 package net.dualwielding;
 
 import net.dualwielding.init.ParticleInit;
-import net.dualwielding.network.AttackEntityPayload;
-import net.dualwielding.access.PlayerAccess;
-import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.entity.Entity;
-import net.neoforged.bus.api.IEventBus;
-import net.neoforged.fml.common.Mod;
-import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
-import net.neoforged.neoforge.network.handling.IPayloadContext;
+import net.dualwielding.network.PlayerAttackPacket;
+import net.minecraftforge.eventbus.api.IEventBus;
+import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
+import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 
 @Mod(DualWieldingMain.MODID)
 public class DualWieldingMain {
 
     public static final String MODID = "dualwielding";
 
-    public DualWieldingMain(IEventBus modEventBus) {
+    public DualWieldingMain() {
+        IEventBus modEventBus = FMLJavaModLoadingContext.get().getModEventBus();
         ParticleInit.PARTICLE_TYPES.register(modEventBus);
-        modEventBus.addListener(DualWieldingMain::registerPayloadHandlers);
+        modEventBus.addListener(this::onCommonSetup);
     }
 
-    private static void registerPayloadHandlers(RegisterPayloadHandlersEvent event) {
-        event.registrar("1")
-                .playToServer(AttackEntityPayload.TYPE, AttackEntityPayload.STREAM_CODEC, DualWieldingMain::handleAttackEntity);
-    }
-
-    private static void handleAttackEntity(AttackEntityPayload payload, IPayloadContext context) {
-        context.enqueueWork(() -> {
-            if (!(context.player() instanceof ServerPlayer player)) {
-                return;
-            }
-            player.resetLastActionTime();
-            Entity entity = player.level().getEntity(payload.entityId());
-            if (entity != null) {
-                ((PlayerAccess) player).attackOffhand(entity);
-            }
-        });
+    private void onCommonSetup(FMLCommonSetupEvent event) {
+        event.enqueueWork(PlayerAttackPacket::init);
     }
 
 }

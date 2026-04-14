@@ -2,12 +2,12 @@ package net.dualwielding;
 
 import net.dualwielding.init.ParticleInit;
 import net.minecraft.client.particle.AttackSweepParticle;
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.bus.api.SubscribeEvent;
-import net.neoforged.fml.common.EventBusSubscriber;
-import net.neoforged.neoforge.client.event.RegisterParticleProvidersEvent;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.client.event.RegisterParticleProvidersEvent;
+import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraftforge.fml.common.Mod;
 
-@EventBusSubscriber(modid = DualWieldingMain.MODID, value = Dist.CLIENT)
+@Mod.EventBusSubscriber(modid = DualWieldingMain.MODID, bus = Mod.EventBusSubscriber.Bus.MOD, value = Dist.CLIENT)
 public class DualWieldingClient {
 
     @SubscribeEvent
