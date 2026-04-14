@@ -10,13 +10,14 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.At.Shift;
 
 import net.dualwielding.access.PlayerAccess;
+import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Gui;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.HumanoidArm;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.api.distmarker.OnlyIn;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.api.distmarker.OnlyIn;
 
 @OnlyIn(Dist.CLIENT)
 @Mixin(Gui.class)
@@ -27,11 +28,11 @@ public abstract class InGameHudMixin {
     @Mutable
     protected Minecraft minecraft;
 
-    private static final ResourceLocation CROSS_HAIR_TEXTURE = new ResourceLocation("dualwielding", "textures/gui/crosshair_indicator.png");
-    private static final ResourceLocation HOTBAR_INDICATOR_TEXTURE = new ResourceLocation("dualwielding", "textures/gui/crosshair_indicator.png");
+    private static final ResourceLocation CROSS_HAIR_TEXTURE = ResourceLocation.fromNamespaceAndPath("dualwielding", "textures/gui/crosshair_indicator.png");
+    private static final ResourceLocation HOTBAR_INDICATOR_TEXTURE = ResourceLocation.fromNamespaceAndPath("dualwielding", "textures/gui/crosshair_indicator.png");
 
     @Inject(method = "renderCrosshair", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/player/LocalPlayer;getAttackStrengthScale(F)F", shift = Shift.AFTER, ordinal = 0))
-    private void renderCrosshairMixinTEST(GuiGraphics context, CallbackInfo info) {
+    private void renderCrosshairMixinTEST(GuiGraphics context, DeltaTracker deltaTracker, CallbackInfo info) {
         float o = ((PlayerAccess) this.minecraft.player).getAttackCooldownProgressDualOffhand(1.0F);
         if (o < 1.0F) {
             int u = (int) (o * 17.0F);
@@ -41,8 +42,8 @@ public abstract class InGameHudMixin {
         }
     }
 
-    @Inject(method = "renderHotbar", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/player/LocalPlayer;getAttackStrengthScale(F)F", shift = Shift.AFTER, ordinal = 0))
-    private void renderHotbar(float tickDelta, GuiGraphics context, CallbackInfo info) {
+    @Inject(method = "renderItemHotbar", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/player/LocalPlayer;getAttackStrengthScale(F)F", shift = Shift.AFTER, ordinal = 0))
+    private void renderHotbar(GuiGraphics context, DeltaTracker deltaTracker, CallbackInfo info) {
         float o = ((PlayerAccess) this.minecraft.player).getAttackCooldownProgressDualOffhand(1.0F);
         if (o < 1.0F) {
             HumanoidArm arm = this.minecraft.player.getMainArm().getOpposite();

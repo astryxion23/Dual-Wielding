@@ -1,206 +1,320 @@
 package net.dualwielding.util;
 
-import java.util.List;
-
 import net.dualwielding.access.PlayerAccess;
 import net.dualwielding.init.ParticleInit;
-import net.dualwielding.mixin.LivingEntityAccessor;
-import net.minecraft.core.particles.ParticleTypes;
+import net.minecraft.core.Holder;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.stats.Stats;
+import net.minecraft.tags.EntityTypeTags;
+import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.entity.MobType;
-import net.minecraft.world.entity.boss.EnderDragonPart;
-import net.minecraft.world.entity.decoration.ArmorStand;
-import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.SwordItem;
-import net.minecraft.world.item.enchantment.EnchantmentHelper;
-import net.minecraft.world.item.enchantment.Enchantments;
-import net.minecraft.world.item.enchantment.SweepingEdgeEnchantment;
+import net.minecraft.world.entity.ai.attributes.Attribute;
 import net.minecraft.world.entity.ai.attributes.AttributeInstance;
 import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
-import net.minecraft.world.effect.MobEffects;
+import net.minecraft.world.entity.decoration.ArmorStand;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.projectile.Projectile;
+import net.minecraft.world.entity.projectile.ProjectileDeflection;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.enchantment.EnchantmentHelper;
+import net.minecraft.world.item.enchantment.Enchantments;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
-import net.minecraft.util.Mth;
+import net.neoforged.neoforge.common.CommonHooks;
+import net.neoforged.neoforge.common.ItemAbilities;
+import net.neoforged.neoforge.entity.PartEntity;
+import net.neoforged.neoforge.event.EventHooks;
 
-public class DualWieldingOffhandAttack {
+public final class DualWieldingOffhandAttack {
+
+    private DualWieldingOffhandAttack() {
+    }
+
+    private static double computeOffhandAttribute(Player player, Holder<Attribute> attribute) {
+        AttributeInstance src = player.getAttribute(attribute);
+        if (src == null) {
+            return attribute.value().getDefaultValue();
+        }
+        AttributeInstance inst = new AttributeInstance(attribute, $ -> {});
+        inst.setBaseValue(src.getBaseValue());
+        for (AttributeModifier mod : src.getModifiers()) {
+            inst.addTransientModifier(mod);
+        }
+        player.getMainHandItem().getAttributeModifiers().forEach(EquipmentSlot.MAINHAND, (attr, mod) -> {
+            if (attr == attribute) {
+                inst.removeModifier(mod.id());
+            }
+        });
+        player.getOffhandItem().getAttributeModifiers().forEach(EquipmentSlot.MAINHAND, (attr, mod) -> {
+            if (attr == attribute && !inst.hasModifier(mod.id())) {
+                inst.addPermanentModifier(mod);
+            }
+        });
+        return inst.getValue();
+    }
 
     public static float getOffhandAttackCooldownProgressPerTick(Player player) {
-        AttributeInstance newInstance = new AttributeInstance(Attributes.ATTACK_SPEED, spd -> player.getAttribute(Attributes.ATTACK_SPEED));
-        if (!player.getMainHandItem().getAttributeModifiers(EquipmentSlot.MAINHAND).values().isEmpty()) {
-            player.getMainHandItem().getAttributeModifiers(EquipmentSlot.MAINHAND).values().forEach((attribute) -> {
-                newInstance.removeModifier(attribute);
-            });
+        double speed = computeOffhandAttribute(player, Attributes.ATTACK_SPEED);
+        return (float) (1.0 / speed * 20.0);
+    }
+
+    private static boolean cannotAttack(Player player, Entity target) {
+        return !target.isAttackable() || target.skipAttackInteraction(player);
+    }
+
+    private static boolean deflectProjectile(Player player, Entity target) {
+        if (target.getType().is(EntityTypeTags.REDIRECTABLE_PROJECTILE)
+                && target instanceof Projectile projectile
+                && projectile.deflect(ProjectileDeflection.AIM_DEFLECT, player, null, true)) {
+            player.level().playSound(null, player.getX(), player.getY(), player.getZ(), SoundEvents.PLAYER_ATTACK_NODAMAGE, player.getSoundSource());
+            return true;
         }
-        if (player.getOffhandItem().getAttributeModifiers(EquipmentSlot.MAINHAND).containsKey(Attributes.ATTACK_SPEED)) {
-            for (AttributeModifier attribute : player.getOffhandItem().getAttributeModifiers(EquipmentSlot.MAINHAND).get(Attributes.ATTACK_SPEED)) {
-                if (!newInstance.hasModifier(attribute)) {
-                    newInstance.addPermanentModifier(attribute);
+        return false;
+    }
+
+    private static boolean canCriticalAttack(Player player, Entity target) {
+        return player.fallDistance > 0.0
+                && !player.onGround()
+                && !player.onClimbable()
+                && !player.isInWater()
+                && !player.hasEffect(MobEffects.BLINDNESS)
+                && !player.isPassenger()
+                && target instanceof LivingEntity
+                && !player.isSprinting();
+    }
+
+    private static float getOffhandKnockback(ServerPlayer player, Entity target, DamageSource damageSource, ItemStack weapon) {
+        float knockback = (float) player.getAttributeValue(Attributes.ATTACK_KNOCKBACK);
+        return player.level() instanceof ServerLevel serverlevel
+                ? EnchantmentHelper.modifyKnockback(serverlevel, weapon, target, damageSource, knockback) / 2.0F
+                : knockback / 2.0F;
+    }
+
+    private static void playServerSideSound(Player player, net.minecraft.sounds.SoundEvent sound) {
+        player.level().playSound(null, player.getX(), player.getY(), player.getZ(), sound, player.getSoundSource(), 1.0F, 1.0F);
+    }
+
+    private static void attackVisualEffects(Player player, Entity target, boolean crit, boolean sweep, boolean strongCooldown, boolean magicOnly, float magicAmount) {
+        if (crit) {
+            playServerSideSound(player, SoundEvents.PLAYER_ATTACK_CRIT);
+            player.crit(target);
+        }
+
+        if (!crit && !sweep && !magicOnly) {
+            playServerSideSound(player, strongCooldown ? SoundEvents.PLAYER_ATTACK_STRONG : SoundEvents.PLAYER_ATTACK_WEAK);
+        }
+
+        if (magicAmount > 0.0F) {
+            player.magicCrit(target);
+        }
+    }
+
+    private static void damageStatsAndHearts(Player player, Entity target, float healthBefore) {
+        if (target instanceof LivingEntity living) {
+            float dealt = healthBefore - living.getHealth();
+            player.awardStat(Stats.DAMAGE_DEALT, Math.round(dealt * 10.0F));
+            if (player.level() instanceof ServerLevel serverLevel && dealt > 2.0F) {
+                int particles = (int) (dealt * 0.5);
+                serverLevel.sendParticles(
+                        net.minecraft.core.particles.ParticleTypes.DAMAGE_INDICATOR,
+                        target.getX(), target.getY(0.5), target.getZ(),
+                        particles, 0.1, 0.0, 0.1, 0.2);
+            }
+        }
+    }
+
+    private static void itemAttackInteraction(ServerPlayer player, Entity attacked, ItemStack weapon, DamageSource damageSource, boolean hurtSucceeded) {
+        Entity entity = attacked;
+        if (attacked instanceof PartEntity<?> part) {
+            entity = part.getParent();
+        }
+
+        boolean hurtEnemyReturn = false;
+        ItemStack weaponCopy = weapon.copy();
+        if (player.level() instanceof ServerLevel serverlevel) {
+            if (entity instanceof LivingEntity livingentity) {
+                hurtEnemyReturn = weapon.hurtEnemy(livingentity, player);
+            }
+
+            if (hurtSucceeded) {
+                EnchantmentHelper.doPostAttackEffectsWithItemSource(serverlevel, attacked, damageSource, weapon);
+            }
+        }
+
+        if (!player.level().isClientSide() && !weapon.isEmpty() && entity instanceof LivingEntity) {
+            if (hurtEnemyReturn) {
+                weapon.postHurtEnemy((LivingEntity) entity, player);
+            }
+
+            if (weapon.isEmpty()) {
+                EventHooks.onPlayerDestroyItem(player, weaponCopy, InteractionHand.OFF_HAND);
+                player.setItemInHand(InteractionHand.OFF_HAND, ItemStack.EMPTY);
+            }
+        }
+    }
+
+    private static void causeExtraKnockback(ServerPlayer player, Entity target, float knockback, Vec3 motionBefore) {
+        if (knockback > 0.0F) {
+            if (target instanceof LivingEntity livingentity) {
+                livingentity.knockback(knockback, Mth.sin(player.getYRot() * ((float) Math.PI / 180)), -Mth.cos(player.getYRot() * ((float) Math.PI / 180)));
+            } else {
+                target.push(
+                        -Mth.sin(player.getYRot() * ((float) Math.PI / 180)) * knockback, 0.1, Mth.cos(player.getYRot() * ((float) Math.PI / 180)) * knockback);
+            }
+
+            player.setDeltaMovement(player.getDeltaMovement().multiply(0.6, 1.0, 0.6));
+            player.setSprinting(false);
+        }
+
+        if (target instanceof ServerPlayer serverTarget && serverTarget.hurtMarked) {
+            serverTarget.connection.send(new ClientboundSetEntityMotionPacket(serverTarget));
+            serverTarget.hurtMarked = false;
+            serverTarget.setDeltaMovement(motionBefore);
+        }
+    }
+
+    private static void doOffhandSweepAttack(ServerPlayer player, Entity primaryTarget, float attackDamageForRatio, DamageSource damageSource, float cooldownStrength, AABB sweepHitBox, ItemStack offWeapon) {
+        playServerSideSound(player, SoundEvents.PLAYER_ATTACK_SWEEP);
+        ServerLevel serverlevel = (ServerLevel) player.level();
+        float ratio = 1.0F + (float) player.getAttributeValue(Attributes.SWEEPING_DAMAGE_RATIO) * attackDamageForRatio;
+        double reachSq = Mth.square(player.entityInteractionRange());
+        for (LivingEntity livingentity : player.level().getEntitiesOfClass(LivingEntity.class, sweepHitBox)) {
+            if (livingentity != player
+                    && livingentity != primaryTarget
+                    && !player.isAlliedTo(livingentity)
+                    && !(livingentity instanceof ArmorStand armorstand && armorstand.isMarker())
+                    && player.distanceToSqr(livingentity) < reachSq) {
+                float sweptDamage = EnchantmentHelper.modifyDamage(serverlevel, offWeapon, livingentity, damageSource, ratio) * cooldownStrength;
+                if (livingentity.hurt(damageSource, sweptDamage)) {
+                    livingentity.knockback(0.4F, Mth.sin(player.getYRot() * ((float) Math.PI / 180)), -Mth.cos(player.getYRot() * ((float) Math.PI / 180)));
+                    EnchantmentHelper.doPostAttackEffects(serverlevel, livingentity, damageSource);
                 }
             }
         }
-        return (float) (1.0 / newInstance.getValue() * 20.0);
+
+        double posOne = -Mth.sin(player.getYRot() * ((float) Math.PI / 180));
+        double posTwo = Mth.cos(player.getYRot() * ((float) Math.PI / 180));
+        serverlevel.sendParticles(ParticleInit.OFFHAND_SWEEPING.get(), player.getX() + posOne, player.getY(0.5D), player.getZ() + posTwo, 0, posOne, 0.0D, posTwo, 0.0D);
+    }
+
+    private static void finishAttackSwing(Player player) {
+        player.resetAttackStrengthTicker();
     }
 
     public static void offhandAttack(Player player, Entity target) {
-        if (!target.isAttackable()) {
+        if (!CommonHooks.onPlayerAttackTarget(player, target)) {
             return;
         }
-        if (target.skipAttackInteraction(player)) {
+        if (cannotAttack(player, target)) {
             return;
         }
+        if (!(player instanceof ServerPlayer serverPlayer)) {
+            return;
+        }
+        ServerLevel serverLevel = (ServerLevel) player.level();
+
         target.invulnerableTime = 0;
 
-        float f = (float) player.getAttribute(Attributes.ATTACK_DAMAGE).getValue();
-        if (!player.level().isClientSide()) {
-            AttributeInstance newInstance = new AttributeInstance(Attributes.ATTACK_DAMAGE, att -> player.getAttribute(Attributes.ATTACK_DAMAGE));
-            if (!player.getMainHandItem().getAttributeModifiers(EquipmentSlot.MAINHAND).values().isEmpty()) {
-                player.getMainHandItem().getAttributeModifiers(EquipmentSlot.MAINHAND).values().forEach((attribute) -> {
-                    newInstance.removeModifier(attribute);
-                });
-            }
-            if (player.getOffhandItem().getAttributeModifiers(EquipmentSlot.MAINHAND).containsKey(Attributes.ATTACK_DAMAGE)) {
-                for (AttributeModifier attribute : player.getOffhandItem().getAttributeModifiers(EquipmentSlot.MAINHAND).get(Attributes.ATTACK_DAMAGE)) {
-                    if (!newInstance.hasModifier(attribute)) {
-                        newInstance.addPermanentModifier(attribute);
-                    }
-                }
-            }
-            f = (float) newInstance.getValue();
+        ItemStack weapon = player.getItemInHand(InteractionHand.OFF_HAND);
+        DamageSource damageSource = player.damageSources().playerAttack(player);
+
+        float f = (float) computeOffhandAttribute(player, Attributes.ATTACK_DAMAGE);
+        float f1 = ((PlayerAccess) player).getAttackCooldownProgressDualOffhand(0.5F);
+        float f2 = f1 * (EnchantmentHelper.modifyDamage(serverLevel, weapon, target, damageSource, f) - f);
+        f *= 0.2F + f1 * f1 * 0.8F;
+
+        if (deflectProjectile(player, target)) {
+            finishAttackSwing(player);
+            return;
         }
 
-        float g = target instanceof LivingEntity ? EnchantmentHelper.getDamageBonus(player.getOffhandItem(), ((LivingEntity) target).getMobType())
-                : EnchantmentHelper.getDamageBonus(player.getOffhandItem(), MobType.UNDEFINED);
-        float h = ((PlayerAccess) player).getAttackCooldownProgressDualOffhand(0.5f);
-        g *= h;
-        ((PlayerAccess) player).resetLastDualOffhandAttackTicks();
-        if ((f *= 0.2f + h * h * 0.8f) > 0.0f || g > 0.0f) {
-            ItemStack itemStack = player.getItemInHand(InteractionHand.OFF_HAND);
-            boolean bl = h > 0.9f;
-            boolean bl2 = false;
-            int i = 0;
-            i += EnchantmentHelper.getItemEnchantmentLevel(Enchantments.KNOCKBACK, itemStack);
-            if (player.isSprinting() && bl) {
-                player.level().playSound(null, player.getX(), player.getY(), player.getZ(), SoundEvents.PLAYER_ATTACK_KNOCKBACK, player.getSoundSource(), 1.0f, 1.0f);
-                ++i;
-                bl2 = true;
-            }
-            boolean bl3 = bl && player.fallDistance > 0.0f && !player.onGround() && !player.onClimbable() && !player.isInWater() && !player.hasEffect(MobEffects.BLINDNESS) && !player.isPassenger()
-                    && target instanceof LivingEntity;
-            bl3 = bl3 && !player.isSprinting();
-            if (bl3) {
-                f *= 1.5f;
-            }
-            f += g;
-            boolean bl42 = false;
-            double d = ((LivingEntityAccessor) player).dualwieldingGetRunStep() - ((LivingEntityAccessor) player).dualwieldingGetRunStepO();
-            if (bl && !bl3 && !bl2 && player.onGround() && d < (double) player.getSpeed() && itemStack.getItem() instanceof SwordItem) {
-                bl42 = true;
-            }
-            float j = 0.0f;
-            boolean bl5 = false;
-            int k = EnchantmentHelper.getItemEnchantmentLevel(Enchantments.FIRE_ASPECT, itemStack);
+        if (f <= 0.0F && f2 <= 0.0F) {
+            finishAttackSwing(player);
+            return;
+        }
 
-            if (target instanceof LivingEntity) {
-                j = ((LivingEntity) target).getHealth();
-                if (k > 0 && !target.isOnFire()) {
-                    bl5 = true;
-                    target.setSecondsOnFire(1);
-                }
-            }
-            Vec3 vec3d = target.getDeltaMovement();
-            DamageSource playerAttack = target.damageSources().playerAttack(player);
-            boolean bl6 = target.hurt(playerAttack, f);
-            if (bl6) {
-                if (i > 0) {
-                    if (target instanceof LivingEntity) {
-                        ((LivingEntity) target).knockback((float) i * 0.5f, Mth.sin(player.getYRot() * ((float) Math.PI / 180)), -Mth.cos(player.getYRot() * ((float) Math.PI / 180)));
-                    } else {
-                        target.push(-Mth.sin(player.getYRot() * ((float) Math.PI / 180)) * (float) i * 0.5f, 0.1, Mth.cos(player.getYRot() * ((float) Math.PI / 180)) * (float) i * 0.5f);
-                    }
-                    player.setDeltaMovement(player.getDeltaMovement().multiply(0.6, 1.0, 0.6));
-                    player.setSprinting(false);
-                }
-                if (bl42) {
-                    float l = 1.0f + SweepingEdgeEnchantment.getSweepingDamageRatio(EnchantmentHelper.getItemEnchantmentLevel(Enchantments.SWEEPING_EDGE, itemStack)) * f;
-                    List<LivingEntity> list = player.level().getEntitiesOfClass(LivingEntity.class, target.getBoundingBox().inflate(1.0, 0.25, 1.0), e -> !e.isSpectator());
-                    for (LivingEntity livingEntity : list) {
-                        if (livingEntity == player || livingEntity == target || player.isAlliedTo(livingEntity)
-                                || livingEntity instanceof ArmorStand && ((ArmorStand) livingEntity).isMarker() || !(player.distanceToSqr(livingEntity) < 9.0))
-                            continue;
-                        livingEntity.knockback(0.4f, Mth.sin(player.getYRot() * ((float) Math.PI / 180)), -Mth.cos(player.getYRot() * ((float) Math.PI / 180)));
-                        livingEntity.hurt(livingEntity.damageSources().playerAttack(player), l);
-                    }
-                    player.level().playSound(null, player.getX(), player.getY(), player.getZ(), SoundEvents.PLAYER_ATTACK_SWEEP, player.getSoundSource(), 1.0f, 1.0f);
+        boolean fullCooldown = f1 > 0.9F;
+        boolean sprintKnockback;
+        if (player.isSprinting() && fullCooldown) {
+            playServerSideSound(player, SoundEvents.PLAYER_ATTACK_KNOCKBACK);
+            sprintKnockback = true;
+        } else {
+            sprintKnockback = false;
+        }
 
-                    double posOne = -Mth.sin(player.getYRot() * ((float) Math.PI / 180));
-                    double posTwo = Mth.cos(player.getYRot() * ((float) Math.PI / 180));
-                    ((ServerLevel) player.level()).sendParticles(ParticleInit.OFFHAND_SWEEPING.get(), player.getX() + posOne, player.getY(0.5D), player.getZ() + posTwo, 0, posOne, 0.0D, posTwo, 0.0D);
-                }
-                if (target instanceof ServerPlayer && target.hasImpulse) {
-                    ((ServerPlayer) target).connection.send(new ClientboundSetEntityMotionPacket(target));
-                    target.hasImpulse = false;
-                    target.setDeltaMovement(vec3d);
-                }
-                if (bl3) {
-                    player.level().playSound(null, player.getX(), player.getY(), player.getZ(), SoundEvents.PLAYER_ATTACK_CRIT, player.getSoundSource(), 1.0f, 1.0f);
-                    player.crit(target);
-                }
-                if (!bl3 && !bl42) {
-                    if (bl) {
-                        player.level().playSound(null, player.getX(), player.getY(), player.getZ(), SoundEvents.PLAYER_ATTACK_STRONG, player.getSoundSource(), 1.0f, 1.0f);
-                    } else {
-                        player.level().playSound(null, player.getX(), player.getY(), player.getZ(), SoundEvents.PLAYER_ATTACK_WEAK, player.getSoundSource(), 1.0f, 1.0f);
-                    }
-                }
-                if (g > 0.0f) {
-                    player.magicCrit(target);
-                }
-                player.setLastHurtMob(target);
-                if (target instanceof LivingEntity) {
-                    EnchantmentHelper.doPostHurtEffects((LivingEntity) target, player);
-                }
-                EnchantmentHelper.doPostDamageEffects(player, target);
-                ItemStack itemStack2 = player.getOffhandItem();
-                Entity entity = target;
-                if (target instanceof EnderDragonPart) {
-                    entity = ((EnderDragonPart) target).parentMob;
-                }
-                if (!player.level().isClientSide() && !itemStack2.isEmpty() && entity instanceof LivingEntity) {
-                    itemStack2.hurtEnemy((LivingEntity) entity, player);
-                    if (itemStack2.isEmpty()) {
-                        player.setItemInHand(InteractionHand.OFF_HAND, ItemStack.EMPTY);
-                    }
-                }
-                if (target instanceof LivingEntity) {
-                    float m = j - ((LivingEntity) target).getHealth();
-                    player.awardStat(Stats.DAMAGE_DEALT, Math.round(m * 10.0f));
-                    if (k > 0) {
-                        target.setSecondsOnFire(k * 4);
-                    }
-                    if (player.level() instanceof ServerLevel && m > 2.0f) {
-                        int n = (int) ((double) m * 0.5);
-                        ((ServerLevel) player.level()).sendParticles(ParticleTypes.DAMAGE_INDICATOR, target.getX(), target.getY(0.5), target.getZ(), n, 0.1, 0.0, 0.1, 0.2);
-                    }
-                    target.invulnerableTime = 0;
-                }
-                player.causeFoodExhaustion(0.1f);
-            } else {
-                player.level().playSound(null, player.getX(), player.getY(), player.getZ(), SoundEvents.PLAYER_ATTACK_NODAMAGE, player.getSoundSource(), 1.0f, 1.0f);
-                if (bl5) {
-                    target.clearFire();
-                }
+        f += weapon.getItem().getAttackDamageBonus(target, f, damageSource);
+
+        boolean vanillaCrit = fullCooldown && canCriticalAttack(player, target);
+        var critEvent = CommonHooks.fireCriticalHit(player, target, vanillaCrit, vanillaCrit ? 1.5F : 1.0F);
+        boolean crit = critEvent.isCriticalHit();
+        if (crit) {
+            f *= critEvent.getDamageMultiplier();
+        }
+
+        float f3 = f + f2;
+
+        boolean blockSweepFromCrit = critEvent.isCriticalHit() && critEvent.disableSweep();
+        boolean vanillaSweep = fullCooldown && !blockSweepFromCrit && !sprintKnockback && player.onGround()
+                && serverPlayer.getKnownMovement().horizontalDistanceSqr() < Mth.square(player.getSpeed() * 2.5)
+                && weapon.canPerformAction(ItemAbilities.SWORD_SWEEP);
+        var sweepEvent = CommonHooks.fireSweepAttack(player, target, vanillaSweep);
+        boolean sweep = sweepEvent.isSweeping();
+
+        float healthBefore = 0.0F;
+        if (target instanceof LivingEntity livingBefore) {
+            healthBefore = livingBefore.getHealth();
+        }
+
+        var enchantmentRegistry = player.registryAccess().lookupOrThrow(Registries.ENCHANTMENT);
+        int fireAspectLevel = weapon.getEnchantmentLevel(enchantmentRegistry.getOrThrow(Enchantments.FIRE_ASPECT));
+        boolean appliedShortFire = false;
+        if (target instanceof LivingEntity && fireAspectLevel > 0 && !target.isOnFire()) {
+            appliedShortFire = true;
+            target.igniteForTicks(20);
+        }
+
+        Vec3 motionBefore = target.getDeltaMovement();
+        boolean hurt = target.hurt(damageSource, f3);
+
+        if (hurt) {
+            float knockback = getOffhandKnockback(serverPlayer, target, damageSource, weapon) + (sprintKnockback ? 0.5F : 0.0F);
+            causeExtraKnockback(serverPlayer, target, knockback, motionBefore);
+
+            if (sweep) {
+                AABB sweepHitBox = weapon.getSweepHitBox(player, target);
+                float attackDamageForSweep = (float) computeOffhandAttribute(player, Attributes.ATTACK_DAMAGE);
+                doOffhandSweepAttack(serverPlayer, target, attackDamageForSweep, damageSource, f1, sweepHitBox, weapon);
+            }
+
+            attackVisualEffects(player, target, crit, sweep, fullCooldown, false, f2);
+            player.setLastHurtMob(target);
+            itemAttackInteraction(serverPlayer, target, weapon, damageSource, true);
+            damageStatsAndHearts(player, target, healthBefore);
+
+            target.invulnerableTime = 0;
+            player.causeFoodExhaustion(0.1F);
+        } else {
+            playServerSideSound(player, SoundEvents.PLAYER_ATTACK_NODAMAGE);
+            if (appliedShortFire) {
+                target.clearFire();
             }
         }
+
+        if (hurt && fireAspectLevel > 0 && target instanceof LivingEntity) {
+            target.igniteForTicks(fireAspectLevel * 80);
+        }
+
+        finishAttackSwing(player);
     }
 
 }
