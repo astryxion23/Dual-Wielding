@@ -11,6 +11,7 @@ import net.dualwielding.access.PlayerAccess;
 import net.dualwielding.network.AttackEntityPayload;
 import net.dualwielding.network.PlayerAttackPacket;
 import net.dualwielding.util.DualWieldingWeaponHelper;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.MultiPlayerGameMode;
 import net.minecraft.client.player.LocalPlayer;
@@ -60,9 +61,7 @@ public class MinecraftClientMixin {
                     ((PlayerAccess) player).resetLastDualOffhandAttackTicks();
                     ((PlayerAccess) this.player).attackOffhand(((EntityHitResult) this.hitResult).getEntity());
 
-                    if (Minecraft.getInstance().getConnection() != null) {
-                        Minecraft.getInstance().getConnection().send(new AttackEntityPayload(((EntityHitResult) this.hitResult).getEntity().getId()));
-                    }
+                    ClientPlayNetworking.send(new AttackEntityPayload(((EntityHitResult) this.hitResult).getEntity().getId()));
                     break;
                 case BLOCK:
                     BlockHitResult blockHitResult = (BlockHitResult) this.hitResult;

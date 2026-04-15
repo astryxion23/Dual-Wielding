@@ -1,6 +1,7 @@
 package net.dualwielding.util;
 
 import net.dualwielding.access.PlayerAccess;
+import net.dualwielding.compat.FabricAttackCompat;
 import net.dualwielding.init.ParticleInit;
 import net.minecraft.core.Holder;
 import net.minecraft.core.registries.Registries;
@@ -30,10 +31,6 @@ import net.minecraft.world.item.enchantment.EnchantmentHelper;
 import net.minecraft.world.item.enchantment.Enchantments;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
-import net.neoforged.neoforge.common.CommonHooks;
-import net.neoforged.neoforge.common.ItemAbilities;
-import net.neoforged.neoforge.entity.PartEntity;
-import net.neoforged.neoforge.event.EventHooks;
 
 public final class DualWieldingOffhandAttack {
 
@@ -50,12 +47,12 @@ public final class DualWieldingOffhandAttack {
         for (AttributeModifier mod : src.getModifiers()) {
             inst.addTransientModifier(mod);
         }
-        player.getMainHandItem().getAttributeModifiers().forEach(EquipmentSlot.MAINHAND, (attr, mod) -> {
+        player.getMainHandItem().forEachModifier(EquipmentSlot.MAINHAND, (attr, mod) -> {
             if (attr == attribute) {
                 inst.removeModifier(mod.id());
             }
         });
-        player.getOffhandItem().getAttributeModifiers().forEach(EquipmentSlot.MAINHAND, (attr, mod) -> {
+        player.getOffhandItem().forEachModifier(EquipmentSlot.MAINHAND, (attr, mod) -> {
             if (attr == attribute && !inst.hasModifier(mod.id())) {
                 inst.addPermanentModifier(mod);
             }
@@ -75,7 +72,7 @@ public final class DualWieldingOffhandAttack {
     private static boolean deflectProjectile(Player player, Entity target) {
         if (target.getType().builtInRegistryHolder().is(EntityTypeTags.REDIRECTABLE_PROJECTILE)
                 && target instanceof Projectile projectile
-                && projectile.deflect(ProjectileDeflection.AIM_DEFLECT, player, null, true)) {
+                && projectile.deflect(ProjectileDeflection.AIM_DEFLECT, player, player, true)) {
             player.level().playSound(null, player.getX(), player.getY(), player.getZ(), SoundEvents.PLAYER_ATTACK_NODAMAGE, player.getSoundSource());
             return true;
         }
@@ -134,10 +131,7 @@ public final class DualWieldingOffhandAttack {
     }
 
     private static void itemAttackInteraction(ServerPlayer player, Entity attacked, ItemStack weapon, DamageSource damageSource, boolean hurtSucceeded) {
-        Entity entity = attacked;
-        if (attacked instanceof PartEntity<?> part) {
-            entity = part.getParent();
-        }
+        Entity entity = FabricAttackCompat.resolveMultipart(attacked);
 
         boolean hurtEnemyReturn = false;
         ItemStack weaponCopy = weapon.copy();
@@ -157,7 +151,6 @@ public final class DualWieldingOffhandAttack {
             }
 
             if (weapon.isEmpty()) {
-                EventHooks.onPlayerDestroyItem(player, weaponCopy, InteractionHand.OFF_HAND);
                 player.setItemInHand(InteractionHand.OFF_HAND, ItemStack.EMPTY);
             }
         }
@@ -195,7 +188,7 @@ public final class DualWieldingOffhandAttack {
                     && !(livingentity instanceof ArmorStand armorstand && armorstand.isMarker())
                     && player.distanceToSqr(livingentity) < reachSq) {
                 float sweptDamage = EnchantmentHelper.modifyDamage(serverlevel, offWeapon, livingentity, damageSource, ratio) * cooldownStrength;
-                if (livingentity.hurtOrSimulate(damageSource, sweptDamage)) {
+                if (livingentity.hurt(damageSource, sweptDamage)) {
                     livingentity.knockback(0.4F, Mth.sin(player.getYRot() * ((float) Math.PI / 180)), -Mth.cos(player.getYRot() * ((float) Math.PI / 180)));
                     EnchantmentHelper.doPostAttackEffects(serverlevel, livingentity, damageSource);
                 }
@@ -204,7 +197,7 @@ public final class DualWieldingOffhandAttack {
 
         double posOne = -Mth.sin(player.getYRot() * ((float) Math.PI / 180));
         double posTwo = Mth.cos(player.getYRot() * ((float) Math.PI / 180));
-        serverlevel.sendParticles(ParticleInit.OFFHAND_SWEEPING.get(), player.getX() + posOne, player.getY(0.5D), player.getZ() + posTwo, 0, posOne, 0.0D, posTwo, 0.0D);
+        serverlevel.sendParticles(ParticleInit.OFFHAND_SWEEPING, player.getX() + posOne, player.getY(0.5D), player.getZ() + posTwo, 0, posOne, 0.0D, posTwo, 0.0D);
     }
 
     private static void finishAttackSwing(Player player) {
@@ -212,7 +205,7 @@ public final class DualWieldingOffhandAttack {
     }
 
     public static void offhandAttack(Player player, Entity target) {
-        if (!CommonHooks.onPlayerAttackTarget(player, target)) {
+        if (!FabricAttackCompat.onPlayerAttackTarget(player, target)) {
             return;
         }
         if (cannotAttack(player, target)) {
@@ -255,20 +248,20 @@ public final class DualWieldingOffhandAttack {
         f += weapon.getItem().getAttackDamageBonus(target, f, damageSource);
 
         boolean vanillaCrit = fullCooldown && canCriticalAttack(player, target);
-        var critEvent = CommonHooks.fireCriticalHit(player, target, vanillaCrit, vanillaCrit ? 1.5F : 1.0F);
-        boolean crit = critEvent.isCriticalHit();
+        FabricAttackCompat.CritResult critEvent = FabricAttackCompat.fireCriticalHit(player, target, vanillaCrit, vanillaCrit ? 1.5F : 1.0F);
+        boolean crit = critEvent.criticalHit();
         if (crit) {
-            f *= critEvent.getDamageMultiplier();
+            f *= critEvent.damageMultiplier();
         }
 
         float f3 = f + f2;
 
-        boolean blockSweepFromCrit = critEvent.isCriticalHit() && critEvent.disableSweep();
+        boolean blockSweepFromCrit = critEvent.criticalHit() && critEvent.disableSweep();
         boolean vanillaSweep = fullCooldown && !blockSweepFromCrit && !sprintKnockback && player.onGround()
                 && serverPlayer.getKnownMovement().horizontalDistanceSqr() < Mth.square(player.getSpeed() * 2.5)
-                && weapon.canPerformAction(ItemAbilities.SWORD_SWEEP);
-        var sweepEvent = CommonHooks.fireSweepAttack(player, target, vanillaSweep);
-        boolean sweep = sweepEvent.isSweeping();
+                && FabricAttackCompat.canPerformSwordSweep(weapon);
+        FabricAttackCompat.SweepResult sweepEvent = FabricAttackCompat.fireSweepAttack(player, target, vanillaSweep);
+        boolean sweep = sweepEvent.sweeping();
 
         float healthBefore = 0.0F;
         if (target instanceof LivingEntity livingBefore) {
@@ -276,7 +269,7 @@ public final class DualWieldingOffhandAttack {
         }
 
         var enchantmentRegistry = player.registryAccess().lookupOrThrow(Registries.ENCHANTMENT);
-        int fireAspectLevel = weapon.getEnchantmentLevel(enchantmentRegistry.getOrThrow(Enchantments.FIRE_ASPECT));
+        int fireAspectLevel = weapon.getEnchantments().getLevel(enchantmentRegistry.getOrThrow(Enchantments.FIRE_ASPECT));
         boolean appliedShortFire = false;
         if (target instanceof LivingEntity && fireAspectLevel > 0 && !target.isOnFire()) {
             appliedShortFire = true;
@@ -284,14 +277,14 @@ public final class DualWieldingOffhandAttack {
         }
 
         Vec3 motionBefore = target.getDeltaMovement();
-        boolean hurt = target.hurtOrSimulate(damageSource, f3);
+        boolean hurt = target.hurt(damageSource, f3);
 
         if (hurt) {
             float knockback = getOffhandKnockback(serverPlayer, target, damageSource, weapon) + (sprintKnockback ? 0.5F : 0.0F);
             causeExtraKnockback(serverPlayer, target, knockback, motionBefore);
 
             if (sweep) {
-                AABB sweepHitBox = weapon.getSweepHitBox(player, target);
+                AABB sweepHitBox = target.getBoundingBox().inflate(1.0D, 0.25D, 1.0D);
                 float attackDamageForSweep = (float) computeOffhandAttribute(player, Attributes.ATTACK_DAMAGE);
                 doOffhandSweepAttack(serverPlayer, target, attackDamageForSweep, damageSource, f1, sweepHitBox, weapon);
             }
