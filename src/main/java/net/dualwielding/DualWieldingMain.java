@@ -20,7 +20,7 @@ public class DualWieldingMain implements ModInitializer {
     public void onInitialize() {
         Registry.register(BuiltInRegistries.PARTICLE_TYPE, Identifier.fromNamespaceAndPath(MODID, "offhand_sweeping"), ParticleInit.OFFHAND_SWEEPING);
 
-        PayloadTypeRegistry.serverboundPlay().register(AttackEntityPayload.TYPE, AttackEntityPayload.STREAM_CODEC);
+        PayloadTypeRegistry.playC2S().register(AttackEntityPayload.TYPE, AttackEntityPayload.STREAM_CODEC);
         ServerPlayNetworking.registerGlobalReceiver(AttackEntityPayload.TYPE, (payload, context) -> {
             context.server().execute(() -> {
                 ServerPlayer player = context.player();
