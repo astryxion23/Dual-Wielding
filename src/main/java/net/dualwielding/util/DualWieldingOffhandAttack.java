@@ -73,7 +73,7 @@ public final class DualWieldingOffhandAttack {
     }
 
     private static boolean deflectProjectile(Player player, Entity target) {
-        if (target.getType().is(EntityTypeTags.REDIRECTABLE_PROJECTILE)
+        if (target.getType().builtInRegistryHolder().is(EntityTypeTags.REDIRECTABLE_PROJECTILE)
                 && target instanceof Projectile projectile
                 && projectile.deflect(ProjectileDeflection.AIM_DEFLECT, player, null, true)) {
             player.level().playSound(null, player.getX(), player.getY(), player.getZ(), SoundEvents.PLAYER_ATTACK_NODAMAGE, player.getSoundSource());
