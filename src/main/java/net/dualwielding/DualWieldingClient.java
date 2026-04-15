@@ -1,18 +1,14 @@
 package net.dualwielding;
 
 import net.dualwielding.init.ParticleInit;
+import net.fabricmc.api.ClientModInitializer;
+import net.fabricmc.fabric.api.client.particle.v1.ParticleProviderRegistry;
 import net.minecraft.client.particle.AttackSweepParticle;
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.bus.api.SubscribeEvent;
-import net.neoforged.fml.common.EventBusSubscriber;
-import net.neoforged.neoforge.client.event.RegisterParticleProvidersEvent;
 
-@EventBusSubscriber(modid = DualWieldingMain.MODID, value = Dist.CLIENT)
-public class DualWieldingClient {
+public class DualWieldingClient implements ClientModInitializer {
 
-    @SubscribeEvent
-    public static void onRegisterParticleProviders(RegisterParticleProvidersEvent event) {
-        event.registerSpriteSet(ParticleInit.OFFHAND_SWEEPING.get(), AttackSweepParticle.Provider::new);
+    @Override
+    public void onInitializeClient() {
+        ParticleProviderRegistry.getInstance().register(ParticleInit.OFFHAND_SWEEPING, AttackSweepParticle.Provider::new);
     }
-
 }
