@@ -195,7 +195,7 @@ public final class DualWieldingOffhandAttack {
                     && !(livingentity instanceof ArmorStand armorstand && armorstand.isMarker())
                     && player.distanceToSqr(livingentity) < reachSq) {
                 float sweptDamage = EnchantmentHelper.modifyDamage(serverlevel, offWeapon, livingentity, damageSource, ratio) * cooldownStrength;
-                if (livingentity.hurt(damageSource, sweptDamage)) {
+                if (livingentity.hurtOrSimulate(damageSource, sweptDamage)) {
                     livingentity.knockback(0.4F, Mth.sin(player.getYRot() * ((float) Math.PI / 180)), -Mth.cos(player.getYRot() * ((float) Math.PI / 180)));
                     EnchantmentHelper.doPostAttackEffects(serverlevel, livingentity, damageSource);
                 }
@@ -284,7 +284,7 @@ public final class DualWieldingOffhandAttack {
         }
 
         Vec3 motionBefore = target.getDeltaMovement();
-        boolean hurt = target.hurt(damageSource, f3);
+        boolean hurt = target.hurtOrSimulate(damageSource, f3);
 
         if (hurt) {
             float knockback = getOffhandKnockback(serverPlayer, target, damageSource, weapon) + (sprintKnockback ? 0.5F : 0.0F);

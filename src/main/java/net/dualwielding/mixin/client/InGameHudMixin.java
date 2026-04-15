@@ -14,12 +14,10 @@ import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Gui;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.client.renderer.RenderPipelines;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.entity.HumanoidArm;
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
 
-@OnlyIn(Dist.CLIENT)
 @Mixin(Gui.class)
 public abstract class InGameHudMixin {
 
@@ -28,8 +26,8 @@ public abstract class InGameHudMixin {
     @Mutable
     protected Minecraft minecraft;
 
-    private static final ResourceLocation CROSS_HAIR_TEXTURE = ResourceLocation.fromNamespaceAndPath("dualwielding", "textures/gui/crosshair_indicator.png");
-    private static final ResourceLocation HOTBAR_INDICATOR_TEXTURE = ResourceLocation.fromNamespaceAndPath("dualwielding", "textures/gui/crosshair_indicator.png");
+    private static final Identifier CROSS_HAIR_TEXTURE = Identifier.fromNamespaceAndPath("dualwielding", "textures/gui/crosshair_indicator.png");
+    private static final Identifier HOTBAR_INDICATOR_TEXTURE = Identifier.fromNamespaceAndPath("dualwielding", "textures/gui/crosshair_indicator.png");
 
     @Inject(method = "renderCrosshair", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/player/LocalPlayer;getAttackStrengthScale(F)F", shift = Shift.AFTER, ordinal = 0))
     private void renderCrosshairMixinTEST(GuiGraphics context, DeltaTracker deltaTracker, CallbackInfo info) {
@@ -38,7 +36,7 @@ public abstract class InGameHudMixin {
             int u = (int) (o * 17.0F);
             int sw = this.minecraft.getWindow().getGuiScaledWidth();
             int sh = this.minecraft.getWindow().getGuiScaledHeight();
-            context.blit(CROSS_HAIR_TEXTURE, sw / 2 - 8, sh / 2 - 7 + 16, 0.0F, 0.0F, u, 4, 16, 16);
+            context.blit(RenderPipelines.GUI_TEXTURED, CROSS_HAIR_TEXTURE, sw / 2 - 8, sh / 2 - 7 + 16, 0.0F, 0.0F, u, 4, 16, 16);
         }
     }
 
@@ -54,7 +52,7 @@ public abstract class InGameHudMixin {
                 r = (sw / 2) - 91 - 22;
             }
             int s = (int) (o * 19.0F);
-            context.blit(HOTBAR_INDICATOR_TEXTURE, r, sh - 20 + 18 - s, 0.0F, 18.0F - s, 18, s, 32, 32);
+            context.blit(RenderPipelines.GUI_TEXTURED, HOTBAR_INDICATOR_TEXTURE, r, sh - 20 + 18 - s, 0.0F, 18.0F - s, 18, s, 32, 32);
         }
     }
 
